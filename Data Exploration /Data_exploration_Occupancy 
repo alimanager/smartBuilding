@@ -1,0 +1,734 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import plotly.io as pio
+import holidays
+from sklearn.cluster import KMeans
+from tabulate import tabulate
+
+
+# Specify your GitHub path
+path = "https://raw.githubusercontent.com/alimanager/smartBuilding/master/"
+
+# Get a list of all .csv files in the GitHub directory
+# Please note that GitHub API doesn't allow listing directory contents, 
+# so you have to provide the names of your csv files manually
+csv_files = ['01_occ.csv', '02_win.csv', '03_light.csv','04_plug.csv','05_temp_in.csv','06_rhu_in.csv','07_rad_global.csv','08_temp_out.csv','09_rhu_out.csv','10_wsp.csv','11_wdi.csv']  # Replace with your actual file names
+
+# Create a dictionary to store DataFrames with corresponding names for each .csv file
+dfs = {}
+
+# Read each .csv file, rename the DataFrame, and store it in the dictionary
+for file_name in csv_files:
+    df_name = file_name.replace('.csv', '')  # Extract DataFrame name from the file name
+    url = path + file_name
+    dfs[df_name] = pd.read_csv(url)  # Create DataFrame with the extracted name
+
+    # Perform the merge based on a common key (e.g., 'common_column')
+    # Replace 'common_column' with the actual column name that is common across all DataFrames
+    merged_df = dfs['01_occ']  # Initialize merged_df with one of the DataFrames
+    for df_name, df in dfs.items():
+        if df_name != '01_occ':  # Skip the first DataFrame since it's already stored in merged_df
+            merged_df = pd.merge(merged_df, df, on='timestamp [dd/mm/yyyy HH:MM]',how='outer' )
+            # merged_df.fillna(method='ffill', inplace=True)
+            # Forward-fill missing temperature values
+            merged_df.fillna(method='ffill', inplace=True)
+
+
+    # Now you have a merged DataFrame named 'merged_df' containing data from all .csv files
+    nan_df = merged_df.isna()
+
+    # If there are any NaN values, the nan_df DataFrame will contain True in those positions.
+    # You can check if there are any NaN values in the entire DataFrame by using the any() method.
+    if nan_df.any().any():
+        print("The DataFrame contains NaN values.")
+    else:
+        print("The DataFrame does not contain NaN values.")
+
+
+    merged_df
+
+# variables selection, models to train/test : 
+# Define global features
+global_features = ['tempOut [C]', 'rh [%]', 'gh [W/m2]', 'wind speed [m/s]']
+
+# Define models
+models = {
+    'kitchen': {
+        'features': ['ki [%]', 'ki [C]', 'ki  [1:closed 0:open]', 'ki [0:off 1:on]'],
+        'target': 'ki [0:vacant 1:occupied]'
+    },
+    'open_desk_4': {
+        'features': ['o4 [%]', 'o4 [C]', 'o4_1 [1:closed 0:open]', 'o4_2 [1:closed 0:open]', 'o4_1 [0:off 1:on]', 'o4_2 [0:off 1:on]'] ,
+        'target': 'o4 [0:vacant 1:occupied]'
+    },
+    # 'meeting_room': {
+    #     'features': ["mr_1 [1:closed 0:open]", "mr_2 [1:closed 0:open]", "mr_3 [1:closed 0:open]", "mr_4 [1:closed 0:open]", "mr_5 [1:closed 0:open]", "mr_6 [1:closed 0:open]", "mr [C]", "mr [%]"] ,
+    #     'target': 'mr [0:vacant 1:occupied]'
+    # },
+    'closed_desk_3': {
+        'features': ["o3_1 [1:closed 0:open]", "o3_2 [1:closed 0:open]", "o3_3 [1:closed 0:open]", "o3_4 [1:closed 0:open]", "o3_1 [0:off 1:on]", "o3_2 [0:off 1:on]", "o3 [W]", "o3 [C]", "o3 [%]"] ,
+        'target': 'o3 [0:vacant 1:occupied]'
+    }
+}
+# Define models labels in french : 
+labels_fr = {
+    'kitchen': {
+        'features': ['Humidité Cuisine [%]', 'Température Cuisine [C]', 'Fenêtre Cuisine [1:fermée 0:ouverte]', 'Lumière Cuisine [0:éteinte 1:allumée]'],
+        'target': 'Occupation Cuisine [0:vacant 1:occupé]'
+    },
+    'open_desk_4': {
+        'features': ['Humidité Bureau Ouvert 4 [%]', 'Température Bureau Ouvert 4 [C]', 'Fenêtre Bureau Ouvert 4_1 [1:fermée 0:ouverte]', 'Fenêtre Bureau Ouvert 4_2 [1:fermée 0:ouverte]', 'Lumière Bureau Ouvert 4_1 [0:éteinte 1:allumée]', 'Lumière Bureau Ouvert 4_2 [0:éteinte 1:allumée]'] ,
+        'target': 'Occupation Bureau Ouvert 4 [0:vacant 1:occupé]'
+    },
+    'closed_desk_3': {
+        'features': ["Fenêtre Bureau Fermé 3_1 [1:fermée 0:ouverte]", "Fenêtre Bureau Fermé 3_2 [1:fermée 0:ouverte]", "Fenêtre Bureau Fermé 3_3 [1:fermée 0:ouverte]", "Fenêtre Bureau Fermé 3_4 [1:fermée 0:ouverte]", "Lumière Bureau Fermé 3_1 [0:éteinte 1:allumée]", "Lumière Bureau Fermé 3_2 [0:éteinte 1:allumée]", "Energie Bureau Fermé 3 [W]", "Température Bureau Fermé 3 [C]", "Humidité Bureau Fermé 3 [%]"] ,
+        'target': 'Occupation Bureau Fermé 3 [0:vacant 1:occupé]'
+    }
+}
+
+"""
+# Get open_desk_4    ex. features and target
+"""
+place ='open_desk_4'
+model = models[place]
+model_features = model['features']
+model_target = model['target']
+
+"""
+#models french labels : 
+"""
+model_label = labels_fr[place]
+model_target_label = model_label['target']
+
+"""
+Binarisation of target : occupation
+"""
+def bins_target(df,target):
+    def categorize_presence(value):
+        if value == 0.0:
+            return 0
+        else:
+            return 1
+    # Check if the feature already exists
+    if target+"_bins" not in df.columns:
+        df[target+"_bins"] = df[target].apply(categorize_presence)
+
+
+"""
+Exploraion : Data Analysis
+"""
+# plot target and features : 
+def plot_target_features():
+    # Plot target
+    plt.figure(figsize=(12,6))
+    plt.plot_date(df['ds'], df['y'], '-')
+    plt.title('Target over time')
+    plt.show()
+
+    # Plot other features
+    for feature in other_features:
+        plt.figure(figsize=(12,6))
+        plt.plot_date(df['ds'], df[feature], '-')
+        plt.title(f'{feature} over time')
+        plt.show()
+    
+
+# Variables correlation : 
+def correlation_plot(df, features,target):
+    """
+    Compute a correlation matrix for a given DataFrame, features list and target variable.
+    Parameters:
+    df : DataFrame
+        The input DataFrame.
+    features : list
+        A list of feature names.
+    target : str
+        The target variable name.
+    Returns:
+    DataFrame
+        The correlation matrix DataFrame.
+    """
+    try : 
+        corr_matrix = df[features + [target]].corr()
+        return corr_matrix
+    except KeyError as e : 
+        print(f"Error: {str(e)}. Please make sure that all features and the target variable exist in the DataFrame.")
+        return None    
+    
+
+# HeatMaps : 
+def HeatMaps(corr_matrix): 
+    plt.subplot()
+    sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', fmt=".2f", linewidths=.5)
+    plt.title(f'Correlation Heatmap of : {model_target}')
+    plt.show()
+
+corr_matrix = correlation_plot(merged_df, model_features + global_features , model_target)
+HeatMaps(corr_matrix)
+bins_target(merged_df,model_target)
+
+#scatter_plot : 
+def scatterplot_target(df,x,y,target):
+    plt.subplot()
+    sns.scatterplot(data=df,x=x,y=y,hue=target)
+    plt.title('Humidity vs Temperature Colored by Occupation')
+    plt.xlabel('Temperature')
+    plt.ylabel('Humidity')
+    plt.show()
+
+temperature = [f for f in model_features if '[C]' in f]
+humidity = [f for f in model_features if '[%]' in f]
+scatterplot_target(merged_df,temperature[0],humidity[0] ,model_target+"_bins")
+
+# PairPlot : 
+def draw_pairplot(df, features, target):
+    # Define colors based on the target
+    # colors = ["#1f77b4" if i == 1 else "#ff7f0e" for i in df[target]]
+    # Create pairplot
+    sns.pairplot(df[features + [target]], diag_kind="kde", plot_kws=dict(alpha=0.7, edgecolor=None, linewidth=0), diag_kws=dict(fill=True), hue=target)
+    plt.title('Pairplot of Features')
+    plt.show()
+
+draw_pairplot(merged_df, model_features + global_features, model_target+"_bins")
+
+# Boxplot: To visualize the statistical summary of the features. Boxplots can be used to detect the outliers in data.
+def draw_boxplot(df, features, target):
+    # Binning the target column
+    bins_target(df, target)
+
+    # Create a new figure and a subplots
+    fig, axs = plt.subplots(len(features), 2, figsize=(15, 5 * len(features)))
+    for i, feature in enumerate(features):
+        # Create boxplot for each feature, separated by the target bins
+        sns.boxplot(x=df[target+"_bins"], y=df[feature], ax=axs[i, 0]).set_title('Boxplot of ' + feature + ' by ' + target)
+        min_value = df[feature].min()
+        max_value = df[feature].max()
+        mean_value = df[feature].mean()
+        axs[i, 0].annotate(f'Min: {min_value:.2f}\nMax: {max_value:.2f}\nMean: {mean_value:.2f}', xy=(0.95, 0.8), xycoords='axes fraction', ha='right')
+
+        # Create histogram for each feature
+        sns.histplot(df[df[target+"_bins"] == 0][feature], ax=axs[i, 1], kde=True, bins=20,  label='0')
+        sns.histplot(df[df[target+"_bins"] == 1][feature], ax=axs[i, 1], kde=True, bins=20,  label='1').set_title('Histogram of ' + feature)
+        axs[i, 1].legend(title=target+"_bins")
+        axs[i, 1].set(xlabel=None)
+        
+    plt.tight_layout()
+    plt.show()
+    
+draw_boxplot(merged_df, model_features + global_features, model_target)
+
+"""
+Times series Vizualisation :
+"""
+def time_series_ploting(df,target):
+
+    # Assuming your 'timestamp [dd/mm/yyyy HH:MM]' column in datetime format
+    df['timestamp [dd/mm/yyyy HH:MM]'] = pd.to_datetime(df['timestamp [dd/mm/yyyy HH:MM]'],format='%d/%m/%Y %H:%M')
+
+    # Resample the data at different intervals
+    hourly_data = df.resample('1H', on='timestamp [dd/mm/yyyy HH:MM]').mean()
+    daily_data = df.resample('24H', on='timestamp [dd/mm/yyyy HH:MM]').mean()
+    weekly_data = df.resample('W', on='timestamp [dd/mm/yyyy HH:MM]').mean()
+    monthly_data = df.resample('M', on='timestamp [dd/mm/yyyy HH:MM]').mean()
+
+    # Create subplots
+    fig = make_subplots(rows=4, cols=1, shared_xaxes=True)
+
+    # Add traces for each aggregated data
+    fig.add_trace(go.Scatter(x=hourly_data.index, y=hourly_data[target], mode='lines', name='1 Hour'), row=1, col=1)
+    fig.add_trace(go.Scatter(x=daily_data.index, y=daily_data[target], mode='lines', name='24 Hours'), row=2, col=1)
+    fig.add_trace(go.Scatter(x=weekly_data.index, y=weekly_data[target], mode='lines', name='Weekly'), row=3, col=1)
+    fig.add_trace(go.Scatter(x=monthly_data.index, y=monthly_data[target], mode='lines', name='Monthly'), row=4, col=1)
+
+    # Update layout
+    fig.update_layout(title=f'Occupancy by Different Time Intervals : {target}',
+                    xaxis_title='Timestamp',
+                    yaxis_title='Occupancy')
+
+    # Show the figure
+    fig.show()
+    import kaleido
+    # Save the plot as an image
+    pio.write_image(fig, 'timeseries_plots.png', format='png')
+
+time_series_ploting(merged_df,model_target)
+
+
+
+def times_heat_maps(data ,target):
+    
+    # Convertir la colonne 'timestamp' en objet datetime
+    data['timestamp'] = pd.to_datetime(data['timestamp [dd/mm/yyyy HH:MM]'], format='%d/%m/%Y %H:%M')
+
+    # Extraire le jour de la semaine (0=lundi, 6=dimanche)
+    data['day_of_week'] = data['timestamp'].dt.dayofweek
+    # Extraire l'heure
+    data['hour'] = data['timestamp'].dt.hour
+
+    # Calculer la moyenne d'occupation par jour de la semaine pour toutes les variables
+    average_occupancy_by_day = data.groupby('day_of_week')[target].mean()
+
+    # Renommer les jours de la semaine
+    day_labels = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche']
+    average_occupancy_by_day.index = day_labels
+
+    # Créer le heatmap
+    plt.figure(figsize=(10, 6))
+    sns.heatmap(average_occupancy_by_day.T, cmap='coolwarm', annot=True, fmt='.2f', cbar=True)
+    plt.title("Occupation Moyenne par Jour de la Semaine")
+    plt.xlabel("Jour de la Semaine")
+    plt.ylabel("")
+    plt.show()
+
+    # Calculer la moyenne d'occupation pour chaque heure
+    hourly_means = data.groupby('hour')[target].mean()
+
+    # Créer un heatmap
+    plt.figure(figsize=(12, 8))
+    sns.heatmap(hourly_means.T, cmap='coolwarm', annot=True, fmt=".1f", linewidths=0.5 )
+    plt.title("Heatmap de l'Occupation Moyenne par Heure")
+    plt.xlabel("Heure")
+    plt.ylabel("")
+    plt.show()
+
+    # Extraire le mois
+    data['month'] = data['timestamp'].dt.month
+
+    # Calculer la moyenne d'occupation pour chaque mois
+    monthly_means = data.groupby('month')[target].mean()
+
+    # Renommer les mois
+    monthly_means.rename(index={1: 'Janvier', 2: 'Février', 3: 'Mars', 4: 'Avril', 5: 'Mai', 6: 'Juin',
+                                7: 'Juillet', 8: 'Août', 9: 'Septembre', 10: 'Octobre', 11: 'Novembre', 12: 'Décembre'}, inplace=True)
+
+    # Créer un heatmap
+    plt.figure(figsize=(12, 8))
+    sns.heatmap(monthly_means.T, cmap='coolwarm', annot=True, fmt=".2f", linewidths=0.5)
+    plt.title("Heatmap de l'Occupation Moyenne par Mois")
+    plt.xlabel("Mois")
+    plt.ylabel("Variables")
+    plt.show()
+
+times_heat_maps(merged_df , [v['target'] for v in models.values()])
+
+occupation_feature = merged_df.filter(like='[0:vacant 1:occupied]').columns
+
+def class_imbalance(df, target_columns):
+    df_percentage = pd.DataFrame()
+
+    for target in target_columns:
+        # Apply binning function
+        bins_target(df, target)
+
+        # Calculate the value counts only once
+        value_counts = df[target+"_bins"].value_counts()
+
+        # Calculate the percentage and plot it
+        df_percentage[target] = value_counts / value_counts.sum() * 100
+
+    df_percentage.T.plot(kind='bar', stacked=True)
+    plt.title('Percentage of Bins for Each Occupation sensor')
+    plt.ylabel('Percentage')
+    plt.show()
+
+class_imbalance(merged_df, occupation_feature)
+
+import plotly.graph_objects as go
+
+def bins_target(df, target):
+    def categorize_presence(value):
+        if value == 0.0:
+            return 0
+        else:
+            return 1
+
+    if target+"_bins" not in df.columns:
+        df[target+"_bins"] = df[target].apply(categorize_presence)
+
+def class_imbalance(df, target_columns):
+    df_percentage = pd.DataFrame()
+
+    for target in target_columns:
+        bins_target(df, target)
+        value_counts = df[target+"_bins"].value_counts()
+        df_percentage[target] = value_counts / value_counts.sum() * 100
+
+    # Plotly bar plot
+    fig = go.Figure()
+
+    for target in df_percentage.columns:
+        fig.add_trace(go.Bar(
+            x=df_percentage.index,
+            y=df_percentage[target],
+            name=target,
+            text=[f'{x:.1f}%' for x in df_percentage[target]],
+            textposition='auto',
+        ))
+
+    fig.update_layout(
+        title='Percentage of Bins for Each Occupation sensor',
+        xaxis_title='Bins',
+        yaxis_title='Percentage',
+        barmode='stack'
+    )
+
+    fig.show()
+
+# Replace with your dataframe and target columns
+class_imbalance(merged_df, occupation_feature)
+
+# def statistics_descriptive(df, date_column,target, by, value):
+#     if by == 'month':
+#         df['month'] = df[date_column].dt.month
+#         grouped = df[df['month'] == value][target]
+#     elif by == 'quarter':
+#         df['quarter'] = df[date_column].dt.quarter
+#         grouped = df[df['quarter'] == value][target]
+#     else:
+#         return "Invalid time frame. Please choose 'month' or 'quarter'."
+    
+#     title = f'Statistics for {by.capitalize()} {value}'
+#     return (grouped.describe())
+
+# statistics_descriptive(merged_df,model_target,'month',9)
+
+# to do : 
+#     simple bar plot 1:0 
+#     Prendre le mois de septembre et faire l’analyse : 
+
+# Evaluer le taux d’occupation des bureaux pour ce mois par mois, par semaine (le jour de la semaine le plus occupé), par heure (les horaires de la journée les plus occupés) 
+
+"""_summary_
+Tests Statistique : La loi de Distribution de notre variable target : 
+"""
+def tests_statistics(data):
+    import scipy.stats as stats
+    from scipy.stats import expon, poisson, gamma, uniform, logistic
+
+    # Normal Distribution
+    norm_params = stats.norm.fit(data)
+    # Exponential Distribution
+    expon_params = expon.fit(data)
+    # Poisson Distribution
+    poisson_param = data.mean()
+    # Gamma Distribution
+    gamma_params = gamma.fit(data)
+    # Uniform Distribution
+    uniform_params = uniform.fit(data)
+    # Logistic Distribution
+    logistic_params = logistic.fit(data)
+
+    # Dataframe to hold the results
+    results = []
+
+    # Perform tests for each distribution
+    for dist_name, dist, params in [('Normal', 'norm', norm_params), 
+                                    ('Exponential', 'expon', expon_params), 
+                                    ('Poisson', 'poisson', (poisson_param,)), 
+                                    ('Gamma', 'gamma', gamma_params),
+                                    ('Uniform', 'uniform', uniform_params),
+                                    ('Logistic', 'logistic', logistic_params)]:
+        # Kolmogorov-Smirnov test
+        ks_stat, ks_p = stats.kstest(data, dist, params)
+        results.append([f'{dist_name} (Kolmogorov-Smirnov)', ks_stat, ks_p, np.nan])
+        
+        # Anderson-Darling test (only for Normal, Exponential, and Logistic)
+        if dist in ['norm', 'expon', 'logistic']:
+            ad_stat, ad_crit_vals, ad_sig_level = stats.anderson(data, dist)
+            results.append([f'{dist_name} (Anderson-Darling)', ad_stat, ad_crit_vals, ad_sig_level])
+
+    # Convert results to a DataFrame
+    results_df = pd.DataFrame(results, columns=['Test', 'Statistic', 'P-Value/Critical Values', 'Significance Level'])
+
+    # Print the results in markdown table form
+    print(tabulate(results_df, headers='keys', tablefmt='pipe', showindex=False))
+
+# test la loi de distribution sur l'année :
+    tests_statistics(merged_df[model_target])
+    
+# Tests aprés filtrage des working hours : 
+    tests_statistics(filter_working_hours(merged_df[model_target]))
+
+# run tests for month
+for i in range(1,4):
+    tests_statistics(run_test(filter_working_hours(merged_df[model_target]),model_target,'month',i))
+
+# run test for weeks: 
+for i in range(1,8):
+    tests_statistics(run_test(filter_working_hours(merged_df),model_target,'week',1)[model_target])
+
+"""_summary_
+Function : first hour & last hour d'occupation  
+"""
+def run_test_min_max(df, target):
+    df['timestamp'] = pd.to_datetime(df['timestamp [dd/mm/yyyy HH:MM]'])
+    df.set_index('timestamp', inplace=True)
+    df_hourly = df.resample('H').mean()
+
+    # Group by date
+    grouped = df_hourly.groupby(df_hourly.index.date)
+
+    # Define a function to get first and last non-zero values
+    def get_first_last_non_zero(group):
+        first_value = group[group[target] != 0.0].first_valid_index()
+        last_value = group[group[target] != 0.0].last_valid_index()
+        return pd.Series([first_value.hour if first_value else None, 
+                          last_value.hour if last_value else None], 
+                          index=['First', 'Last'])
+
+    # Apply function to each group
+    result = grouped.apply(get_first_last_non_zero)
+
+    return  result
+result = run_test_min_max(merged_df, model_target).describe().iloc[1:,]
+result['Premier'] = result['First'].apply(lambda x: f"{format(x, '.2f')} H" if pd.notnull(x) else None)
+result['Last'] = result['Last'].apply(lambda x: f"{format(x, '.2f')} H" if pd.notnull(x) else None)
+
+print(tabulate(result, headers='keys', tablefmt='pipe'))
+
+def filter_working_hours(df, week_end_too=None):
+    df['timestamp'] = pd.to_datetime(df['timestamp [dd/mm/yyyy HH:MM]'])
+    df.set_index('timestamp', inplace=True)
+    # Filter the data to include only the hours from 6 to 16
+    df_working_hours = df.between_time('6:00', '17:00')
+    if week_end_too == True : 
+        df_working_days = df_working_hours[df_working_hours.index.weekday < 5]
+    return df_working_hours
+
+
+# Test by hour : 
+# def run_test(df, target, by, on):
+#     df['timestamp'] = pd.to_datetime(df['timestamp [dd/mm/yyyy HH:MM]'])
+#     df.set_index('timestamp', inplace=True)
+#     df_hourly = df.resample('H').mean()
+#     df_hourly['hour'] = df_hourly.index.hour
+#     df_hourly['week'] = df_hourly.index.week
+#     df_hourly['month'] = df_hourly.index.month
+#     df_hourly['week_of_month'] = df_hourly.index.to_series().apply(week_of_month)
+
+#     if by == 'week':
+#         df_hourly = df_hourly[df_hourly['week'] == on]
+        
+#     elif by == 'month':
+#         df_hourly = df_hourly[df_hourly['month'] == on]
+        
+#     return df_hourly[[target,"hour","week","week_of_month","month"]]
+
+# run_time : daily, monthly, quarter : 
+
+# def run_test_daily(df, target, by, start_on, end_on=None):
+#     df['timestamp'] = pd.to_datetime(df['timestamp [dd/mm/yyyy HH:MM]'])
+#     df.set_index('timestamp', inplace=True)
+#     df_daily = df.resample('D').mean()
+#     df_daily['day'] = df_daily.index.day
+#     df_daily['week'] = df_daily.index.week
+#     df_daily['month'] = df_daily.index.month
+#     df_daily['quarter'] = df_daily.index.quarter 
+#     if by == 'week':
+#         if end_on is not None:
+#             df_daily = df_daily[(df_daily['week'] >= start_on) & (df_daily['week'] <= end_on)]
+#         else:
+#             df_daily = df_daily[df_daily['week'] == start_on]
+#     elif by == 'month':
+#         if end_on is not None:
+#             df_daily = df_daily[(df_daily['month'] >= start_on) & (df_daily['month'] <= end_on)]
+#         else:
+#             df_daily = df_daily[df_daily['month'] == start_on]
+#     elif by == 'quarter':  # Add this block
+#         if end_on is not None:
+#             df_daily = df_daily[(df_daily['quarter'] >= start_on) & (df_daily['quarter'] <= end_on)]
+#         else:
+#             df_daily = df_daily[df_daily['quarter'] == start_on]
+                                
+#     return df_daily[[target,"day","week","month","quarter"]]
+
+def run_test_resample(df, target, by, start_on, end_on=None, by_hour=False):
+    df['timestamp'] = pd.to_datetime(df['timestamp [dd/mm/yyyy HH:MM]'])
+    df.set_index('timestamp', inplace=True)
+    
+    # Resample the data by hour or by day
+    if by_hour:
+        df_resampled = df.resample('H').mean(numeric_only=True)
+        time_label = 'hour'
+        df_resampled[time_label] = df_resampled.index.hour
+    else:
+        df_resampled = df.resample('D').mean(numeric_only=True)
+        time_label = 'day'
+        df_resampled[time_label] = df_resampled.index.day
+    
+    df_resampled['week'] = df_resampled.index.week
+    # df_resampled['week'] = df_resampled.index.isocalendar().week
+    df_resampled['month'] = df_resampled.index.month
+    df_resampled['quarter'] = df_resampled.index.quarter 
+
+    if by == 'week':
+        if end_on is not None:
+            df_resampled = df_resampled[(df_resampled['week'] >= start_on) & (df_resampled['week'] <= end_on)]
+        else:
+            df_resampled = df_resampled[df_resampled['week'] == start_on]
+    elif by == 'month':
+        if end_on is not None:
+            df_resampled = df_resampled[(df_resampled['month'] >= start_on) & (df_resampled['month'] <= end_on)]
+        else:
+            df_resampled = df_resampled[df_resampled['month'] == start_on]
+    elif by == 'quarter':  # Add this block
+        if end_on is not None:
+            df_resampled = df_resampled[(df_resampled['quarter'] >= start_on) & (df_resampled['quarter'] <= end_on)]
+        else:
+            df_resampled = df_resampled[df_resampled['quarter'] == start_on]
+    
+    df_resampled['month'] = df_resampled['month'].apply(lambda x: calendar.month_abbr[x])
+    return df_resampled[[target,time_label,"week","month","quarter"]]
+
+
+
+
+
+
+def create_bar_plot(df, x_col, y_col, title, xlabel, ylabel):
+    plt.figure(figsize=(10,6))
+    plt.bar(df[x_col], df[y_col])
+    plt.title(title)
+    plt.xlabel(f'by { x_col }')
+    plt.ylabel(f'Average {model_target_label}')
+
+
+    plt.show()
+# Here is an example of how to use this function:
+
+df_resampled = run_test_resample(filter_working_hours(merged_df), model_target, 'day', 1,2, by_hour=True)
+create_bar_plot(df_resampled, 'hour', model_target, 'Average Target by Hour', 'Hour of Day', 'Average Target')
+
+
+
+
+
+
+
+
+
+  
+ax = sns.barplot(run_test_daily(filter_working_hours(merged_df),model_target,'month',3),
+            y=model_target,x= "day",
+            # native_scale=True
+            width=0.75
+            )
+sns.boxplot(run_test_daily(filter_working_hours(merged_df),model_target,'month',3)[model_target],)
+ax.bar_label(ax.containers[0], fontsize=10);
+sns.displot(run_test_daily(filter_working_hours(merged_df),model_target,'month',1),x=model_target, kind="kde")
+
+
+
+import plotly.express as px
+fig = px.bar(run_test_daily(filter_working_hours(merged_df),model_target,'week',1,12),
+             y=model_target,x= "day", animation_frame="week")
+
+# fig.update_layout(
+#     animation_duration=1000  # adjust this value to your liking
+# )
+fig.update_layout(
+    yaxis = dict(
+        range=[0, 1]  # sets the range of yaxis
+    ), 
+    xaxis = dict(
+        range=[0, 31]  # sets the range of yaxis
+    )
+)
+
+fig.show()
+
+run_test_daily(filter_working_hours(merged_df), model_target, 'quarter', 1, 4)  # adjust parameters as needed
+fig = px.bar(df, y=model_target, x="day", animation_frame="quarter")
+fig.show()
+
+from math import ceil
+def week_of_month(date):
+    first_day = date.replace(day=1)
+    dom = date.day
+    adjusted_dom = dom + first_day.weekday()
+    return int(ceil(adjusted_dom/7.0))
+
+def run_test(df, target, by, on):
+    df['timestamp'] = pd.to_datetime(df['timestamp [dd/mm/yyyy HH:MM]'])
+    df.set_index('timestamp', inplace=True)
+    # df_hourly = df.resample('H').mean()
+    # df_hourly['hour'] = df_hourly.index.hour
+    # df_hourly['week'] = df_hourly.index.week
+    # df_hourly['month'] = df_hourly.index.month
+    # df_hourly['week_of_month'] = df_hourly.index.to_series().apply(week_of_month)
+    #  # Resample by day
+    # df_daily = df.resample('D').mean()
+    # df_daily['day_of_week'] = df_daily.index.dayofweek
+    # df_daily['week_of_month'] = df_daily.index.to_series().apply(week_of_month)
+    
+    # Resample by hour
+    # df_hourly = df.resample('H').mean()
+    # df_hourly['hour'] = df_hourly.index.hour
+  
+
+    # Resample by day
+    df_daily = df.resample('D').mean()
+    # df_daily['week'] = df_hourly.index.week
+    # df_hourly['month'] = df_hourly.index.month
+    df_daily['day_of_week'] = df_daily.index.dayofweek
+    df_daily['week_of_month'] = df_daily.index.to_series().apply(week_of_month)
+
+    # Resample by week
+    df_weekly = df.resample('W').mean()
+    df_weekly['week'] = df_weekly.index.week
+
+    # Resample by month
+    df_monthly = df.resample('M').mean()
+    df_monthly['month'] = df_monthly.index.month
+
+    if by == 'week':
+        df_hourly = df_daily[df_hourly['week'] == on]
+    elif by == 'month':
+        df_hourly = df_hourly[df_hourly['month'] == on]
+        
+    return df_hourly, df_daily, df_weekly, df_monthly
+
+fig = px.bar(run_test(merged_df,model_target,'month',1),
+             y=model_target,
+             x= "hour", 
+             animation_frame="week_of_month")
+
+fig.update_layout(
+    yaxis = dict(
+        range=[0, 1]  # sets the range of yaxis
+    )
+)
+
+fig.show()
+
+# Box plot : 
+def boxplot(df, models):
+    for model_name, model_info in models.items():
+        fig, axs = plt.subplots(1, len(model_info['features']) + 1, figsize=(15, 5))
+        fig.suptitle(f'Box plots : {labels_fr[model_name]["target"]}', fontsize=16)
+
+        # Box plot for features
+        for i, feature in enumerate(model_info['features']):
+            sns.boxplot(ax=axs[i], y=df[feature], data=df)
+            axs[i].set_ylabel(labels_fr[model_name]['features'][i])  # set the x-axis label as the feature name
+            medians = df[feature].median()
+            # mean = df[feature].mean()
+            axs[i].annotate(f'Median: {medians:.2f}', xy=(0.4, 0.9), xycoords='axes fraction')
+            # axs[i].annotate(f'Mean: {mean:.2f}', xy=(0.4, 0.85), xycoords='axes fraction')
+
+        # Box plot for target
+        sns.boxplot(ax=axs[-1], y=df[model_info['target']], data=df)
+        axs[-1].set_ylabel(labels_fr[model_name]['target'])  # set the x-axis label as the target name
+        medians = df[model_info['target']].median()
+        # mean = df[model_info['target']].mean()
+        axs[-1].annotate(f'Median: {medians:.2f}', xy=(0.4, 0.9), xycoords='axes fraction')
+        # axs[-1].annotate(f'Mean: {mean:.2f}', xy=(0.4, 0.85), xycoords='axes fraction')
+
+        plt.tight_layout(rect=[0, 0, 1, 0.96])  # to provide space for the suptitle
+        plt.show()
+        
+boxplot(merged_df, models)

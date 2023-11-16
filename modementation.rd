@@ -22,16 +22,28 @@ Contexte :  machine learning in iot , prédiction of occupancy of rooms desktop 
         + unbalanced between occupancy and absence 30 %\ in average, which unbalanced classification class
         + A time serie each 15 min : sensors calculate the time occupied of the total time : we have percent of time occuiped in each room, Desktop & kitchen. 
         + Discritization of continous varibale into binary class {0} in 0 percent Absence else we assume {1} occupancy
-        + normalisation of the distribution ? 
+        + Density : normalisation of the distribution ? 
         + Correlation : we don't have a significant correlation between the target and other features
         +         
 
     + Modelisation : 
-        + the approch of modélisation 
-        + Split into Train & test the dataset
-        + machine learning classification : Xgboost as main model presentation
-        + metrics definition 
-        + Evalution 
-        + interpretation 
+        + Supervised Learning : Classification : 
+            + the approch of modélisation 
+            + Split into Train & test the dataset
+            + machine learning classification : Xgboost as main model presentation
+            + metrics definition 
+            + Evalution 
+            + interpretation 
+        + Unsupervised Learning : Regression
+        + Model Gamma
+
+        + Time Series : Humidité , Temperature
+            + the approch of modélisation 
+            + Split into Train & test the dataset
+            + forcasting Prophet 
+            + parameters used & hyper-parameters tuning 
+            + metrics definition 
+            + Evalution 
+            + interpretation 
 
 
