@@ -261,11 +261,10 @@ def forcasting(df, time_forcast_in_days, target ):
     
     # # Define initial and horizon
     # # Specify the length of the initial training period and the prediction horizon
-    # horizon = str(24 * time_forcast_in_days )+ ' hours' 
-    # initial = str(((len(df)) - (24 * time_forcast_in_days))/2) + ' hours'
-    # horizon = str(24 * time_forcast_in_days )+ 'hours' 
-
-
+    
+    horizon = str(24 * time_forcast_in_days )+ ' hours' 
+    initial = str(((len(df)) - (24 * time_forcast_in_days))/2) + ' hours'
+    
 
     m = Prophet(changepoint_prior_scale='0.01',seasonality_prior_scale = '0.01',
                 seasonality_mode='multiplicative',
@@ -283,12 +282,12 @@ def forcasting(df, time_forcast_in_days, target ):
     fig = m.plot(forecast)
     fig = m.plot_components(forecast)
 
-    total_length = len(df)
-    initial_length = int(total_length * 0.8)  # Use 80% of data for training
-    horizon_length = total_length - initial_length  # Remaining 20% for forecasting
+    # total_length = len(df)
+    # initial_length = int(total_length * 0.8)  # Use 80% of data for training
+    # horizon_length = total_length - initial_length  # Remaining 20% for forecasting
 
-    initial = str(initial_length) + ' hours'
-    horizon = str(horizon_length) + ' hours'
+    # initial = str(initial_length) + ' hours'
+    # horizon = str(horizon_length) + ' hours'
     # Evaluation : 
     from prophet.diagnostics import performance_metrics
     cv = cross_validation(model=m,initial=initial, horizon =horizon)
@@ -299,18 +298,30 @@ def forcasting(df, time_forcast_in_days, target ):
 
 
 ## Hyper-parameters tuning : # Python
-def hyper_tuning(df): 
+def hyper_tuning(df,time_forcast_in_days, target): 
     import itertools
     import numpy as np
     import pandas as pd
     df = df.rename(columns = {'timestamp [dd/mm/yyyy HH:MM]' : 'ds', target: 'y'})
     df["ds"] = pd.to_datetime(df["ds"], format = "%d/%m/%Y %H:%M")
-    total_length = len(df)
-    initial_length = int(total_length * 0.8)  # Use 80% of data for training
-    horizon_length = total_length - initial_length  # Remaining 20% for forecasting
+    print("check data processing : ")
+    print("First timestamp in dataframe:", df['ds'].min())
+    print("Last timestamp in dataframe:", df['ds'].max())
+    full_range = pd.date_range(start=df['ds'].min(), end=df['ds'].max(), freq='H')
+    missing_timestamps = full_range.difference(df['ds'])
+    print("Missing timestamps:", missing_timestamps)
+    
+    df = df[["ds","y"]]
 
-    initial = str(initial_length) + ' hours'
-    horizon = str(horizon_length) + ' hours'
+    df.set_index('ds', inplace=True)
+    df = df.resample('H').mean()  # or use .sum(), .max(), etc. depending on your needs
+    df.reset_index(inplace=True)
+    
+    horizon = str(24 * time_forcast_in_days )+ ' hours' 
+    historic = str((len(df)) - (24 * time_forcast_in_days)) + ' hours'
+    initial = str((len(historic)/2) - (24 * time_forcast_in_days)) + ' hours'
+    
+    
     param_grid = {  
         'changepoint_prior_scale': [0.001, 0.01, 0.1, 0.5],
         'seasonality_prior_scale': [0.01, 0.1, 1.0, 10.0],
@@ -323,7 +334,7 @@ def hyper_tuning(df):
     # Use cross validation to evaluate all parameters
     for params in all_params:
         m2 = Prophet(**params).fit(df)  # Fit model with given params
-        df_cv = cross_validation(m2, initial=initial, horizon= horizon, parallel="processes")
+        df_cv = cross_validation(m2, initial=initial, horizon=horizon, parallel="processes")
         df_p = performance_metrics(df_cv, rolling_window=1)
         rmses.append(df_p['rmse'].values[0])
 
@@ -333,8 +344,10 @@ def hyper_tuning(df):
     print(tuning_results)
     best_params = all_params[np.argmin(rmses)]
     print(best_params)
-    
+
+
+# historic = intial intial+ horizon/2 horizon
     
 target = 'o4 [%]'
-hyper_tuning(merged_df)
+hyper_tuning(merged_df,20, target)
 forcasting(merged_df,20, target)

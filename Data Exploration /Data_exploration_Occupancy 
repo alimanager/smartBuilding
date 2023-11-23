@@ -9,7 +9,7 @@ import holidays
 from sklearn.cluster import KMeans
 from tabulate import tabulate
 
-
+# read Dataset
 # Specify your GitHub path
 path = "https://raw.githubusercontent.com/alimanager/smartBuilding/master/"
 
@@ -91,6 +91,7 @@ labels_fr = {
 }
 
 """
+##### to be changed : La piéce à prédire 
 # Get open_desk_4    ex. features and target
 """
 place ='open_desk_4'
@@ -122,20 +123,32 @@ def bins_target(df,target):
 Exploraion : Data Analysis
 """
 # plot target and features : 
-def plot_target_features():
+import matplotlib.dates as mdates
+
+def plot_target_features(df, target, other_features):
+    df['timestamp'] = pd.to_datetime(df['timestamp [dd/mm/yyyy HH:MM]'], format="%d/%m/%Y %H:%M")
+    df.set_index('timestamp', inplace=True)
+    df = df.resample('H').mean()
+    df.reset_index(inplace=True)
+    
     # Plot target
-    plt.figure(figsize=(12,6))
-    plt.plot_date(df['ds'], df['y'], '-')
-    plt.title('Target over time')
+    fig, ax = plt.subplots(figsize=(12,6))
+    ax.plot_date(df['timestamp'], df[target], '-')
+    ax.set_title('Target over time')
+    ax.xaxis.set_major_locator(mdates.MonthLocator())  # to display months on x-axis
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))  # to format x-axis dates as 'YYYY-MM'
     plt.show()
 
     # Plot other features
     for feature in other_features:
-        plt.figure(figsize=(12,6))
-        plt.plot_date(df['ds'], df[feature], '-')
-        plt.title(f'{feature} over time')
+        fig, ax = plt.subplots(figsize=(12,6))
+        ax.plot_date(df['timestamp'], df[feature], '-')
+        ax.set_title(f'{feature} over time')
+        ax.xaxis.set_major_locator(mdates.MonthLocator())  # to display months on x-axis
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))  # to format x-axis dates as 'YYYY-MM'
         plt.show()
     
+plot_target_features(merged_df, model_target, model_features)
 
 # Variables correlation : 
 def correlation_plot(df, features,target):
@@ -490,6 +503,9 @@ result['Last'] = result['Last'].apply(lambda x: f"{format(x, '.2f')} H" if pd.no
 
 print(tabulate(result, headers='keys', tablefmt='pipe'))
 
+"""
+# Les horaires de travail :
+"""
 def filter_working_hours(df, week_end_too=None):
     df['timestamp'] = pd.to_datetime(df['timestamp [dd/mm/yyyy HH:MM]'])
     df.set_index('timestamp', inplace=True)
@@ -584,11 +600,6 @@ def run_test_resample(df, target, by, start_on, end_on=None, by_hour=False):
     df_resampled['month'] = df_resampled['month'].apply(lambda x: calendar.month_abbr[x])
     return df_resampled[[target,time_label,"week","month","quarter"]]
 
-
-
-
-
-
 def create_bar_plot(df, x_col, y_col, title, xlabel, ylabel):
     plt.figure(figsize=(10,6))
     plt.bar(df[x_col], df[y_col])
@@ -599,7 +610,6 @@ def create_bar_plot(df, x_col, y_col, title, xlabel, ylabel):
 
     plt.show()
 # Here is an example of how to use this function:
-
 df_resampled = run_test_resample(filter_working_hours(merged_df), model_target, 'day', 1,2, by_hour=True)
 create_bar_plot(df_resampled, 'hour', model_target, 'Average Target by Hour', 'Hour of Day', 'Average Target')
 
