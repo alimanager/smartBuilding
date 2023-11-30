@@ -14,6 +14,7 @@ from datetime import datetime
 from sklearn.metrics import mean_squared_error
 import matplotlib.pyplot as plt
 
+
 # Specify your GitHub path
 path = "https://raw.githubusercontent.com/alimanager/smartBuilding/master/"
 
@@ -97,8 +98,9 @@ labels_fr = {
 
 # !!! to be changed : open_desk_4 is selected !!!
 place ='open_desk_4'
-
 # !!! then the target and features will be selected accordinly :
+
+
 model = models[place]
 # Occupancy : 
 model_features = model['features']
@@ -126,9 +128,9 @@ Returns:
 # Categorize the target variable into classes : 
 def categorize_presence(value):
     if value == 0.0:
-        return 0.0
+        return 0
     else:
-        return 1.0
+        return 1
 
 # filter working hours : 
     """_summary_
@@ -137,19 +139,22 @@ def categorize_presence(value):
         _type_: _description_
     """
 import mlflow
- 
-def Classification(df,target,features,best_by="Accuracy", place=None):
+
+"""best_y : "Prec." , "Recall", "F1"
+"""
+
+def Classification(df,target,features,best_by, place=None,new_data=None):
     from pycaret.classification import setup,compare_models,pull, create_model, tune_model, predict_model, plot_model, evaluate_model, finalize_model, ClassificationExperiment
 
-    Model = setup(df[features], target= df[target].apply(categorize_presence), fix_imbalance=True ,preprocess=False,  normalize=True, normalize_method='zscore')
+    Model = setup(df[features], target= df[target].apply(categorize_presence),preprocess=False,  normalize=True, normalize_method='zscore')
     # Benchmarking the algorithmes for classification the target with pycaret : 
     # For Accuracy:
     if best_by == "Accuracy":
         # setup(df[features], target= df[target].apply(categorize_presence), fix_imbalance=True ,preprocess=False,  normalize=True, normalize_method='zscore', log_experiment = True, experiment_name =place )
         best_model = compare_models(sort='Accuracy')
     # For Recall:
-    elif best_by == "Recall":
-        best_model = compare_models(sort='Recall')
+    elif best_by == best_by:
+        best_model = compare_models(sort=best_by)
     else:
         print(f"Invalid value for best_by: {best_by}. Defaulting to 'Accuracy'.")
         best_model = compare_models(sort='Accuracy')
@@ -172,8 +177,9 @@ def Classification(df,target,features,best_by="Accuracy", place=None):
     ## Evaluation model 2: 
 
     plot_model(model_tuned, plot = 'auc')
-    plot_model(model_tuned, plot = 'feature')
-    plot_model(model_tuned, plot = 'confusion_matrix')
+    if best_by != "Prec.":
+        plot_model(model_tuned, plot = 'feature')
+        plot_model(model_tuned, plot = 'confusion_matrix')
 
     # evaluate_model(model_tuned)
     results_model2 = pull()
@@ -185,15 +191,23 @@ def Classification(df,target,features,best_by="Accuracy", place=None):
     print(final_model)
     
     #for Production new data : 
-    # predictions = predict_model(final_model, data=data_unseen)
-    # print(predictions.head())
-    
-    return final_model 
+    predictions = None
+    if new_data  is not None and not new_data.empty:
+        predictions = predict_model(final_model, data=new_data)
+        print(predictions.columns)
+        
+        # # Visualize actual vs predicted values
+        # visualize_predictions(predictions[target], predictions['prediction_label'],
+        #                        f'{target} Prediction - {place}', 'Timestamp', target)
+    predictions
+    return final_model, predictions
 
-def regression(df,target,features,best_by="R2", place=None):
+    """_summary_
+    Best_by = "R2", "RMSE"
+    """
+def regression(df,target,features,best_by="R2", place=None,new_data=None):
     from pycaret.regression import setup,compare_models,pull, create_model, tune_model, predict_model, plot_model, evaluate_model, finalize_model
-
-    Model = setup(df[features], target= df[target], preprocess=False,  normalize=True, normalize_method='zscore')
+    Model = setup(df[features], target= df[target], preprocess=False, normalize=True, normalize_method='zscore')
     # Benchmarking the algorithmes for regression the target with pycaret : 
     if best_by == "R2":
         best_model = compare_models(sort='R2')  # sorts by R2
@@ -228,7 +242,7 @@ def regression(df,target,features,best_by="R2", place=None):
     plot_model(model_tuned, plot = 'feature')
     plot_model(model_tuned, plot = 'learning')
     plot_model(model_tuned, plot = 'vc')
-    plot_model(model_tuned, plot = 'cooks')
+   
 
     # evaluate_model(model_tuned)
     results_model2 = pull()
@@ -240,10 +254,12 @@ def regression(df,target,features,best_by="R2", place=None):
     print(final_model)
     
     #for Production new data : 
-    # predictions = predict_model(final_model, data=data_unseen)
-    # print(predictions.head())
+    predictions = None
+    if new_data  is not None and not new_data.empty:
+        predictions = predict_model(final_model, data=new_data)
+        print(predictions.columns)
     
-    return final_model 
+    return final_model , predictions
 
 """
 # Get open_desk_4    ex. features and target
@@ -255,17 +271,264 @@ def regression(df,target,features,best_by="R2", place=None):
         - closed_desk_3
 """
 
-Classification(merged_df,model_target, model_features,best_by="Recall", place=place)
+# Assuming 'timestamp [dd/mm/yyyy HH:MM]' is in datetime format
+merged_df['timestamp'] = pd.to_datetime(merged_df['timestamp [dd/mm/yyyy HH:MM]'], format='%d/%m/%Y %H:%M')
+merged_df.set_index('timestamp', inplace=True)
+
+# Resample the data by hour
+merged_df = merged_df.resample('H').mean()
+
+# Filter data for December
+december_data_hourly = merged_df[merged_df.index.month == 12]
+
+# Training set (excluding December)
+train_data_hourly = merged_df[merged_df.index.month != 12].copy()
+
+# Test set (December only)
+test_data_hourly = december_data_hourly.copy()
+
+#Filter out ; working hours:::
+# def filter_working_hours(df, week_end_too=None, holidays_too=None):
+#     # df['timestamp [dd/mm/yyyy HH:MM]'] = pd.to_datetime(df['timestamp [dd/mm/yyyy HH:MM]'])
+#     # df.set_index('timestamp [dd/mm/yyyy HH:MM]', inplace=True)
+    
+#     # Filter the data to include only the hours from 6 to 17
+#     df_working_hours = df.between_time('6:00', '17:00')
+    
+#     if week_end_too == True:
+#         # Identify weekends and public holidays in Austria
+#         at_holidays = holidays.Austria(years=df_working_hours.index.year.unique())
+#         df_working_hours['is_weekend_or_holiday'] = df_working_hours.index.to_series().apply(lambda x: x.weekday() >= 5 or x in at_holidays)
+
+#         # Filter out weekends and holidays from the analysis
+#         df_working_hours = df_working_hours[~df_working_hours['is_weekend_or_holiday']]
+#     # df_working_hours.drop("is_weekend_or_holiday")    
+#     return df_working_hours
+
+# test_data_hourly = filter_working_hours(test_data_hourly, week_end_too=True)
+# train_data_hourly = filter_working_hours(train_data_hourly, week_end_too=True)
+
+# import os, sys
+# sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# from Data_loader import *
+
+# Train and evaluate classification model
+classification_model, classification_predictions = Classification(train_data_hourly, model_target, model_features+global_features, best_by="Accuracy", place=place,new_data=test_data_hourly)
+classification_model, classification_predictions = regression(train_data_hourly,model_target, model_features + global_features, best_by="RMSE", place=place,new_data=test_data_hourly)
+
+classification_predictions["prediction_label"].plot()
+classification_predictions[model_target].apply(categorize_presence).plot()
+
+classification_predictions["prediction_score"].plot()
+classification_predictions[model_target].plot()
+
+from sklearn.metrics import classification_report, confusion_matrix
+
+
+y_pred = classification_predictions["prediction_label"]
+y_true = classification_predictions[model_target].apply(categorize_presence)
+
+print(classification_report(y_true, y_pred))
+print(confusion_matrix(y_true, y_pred))
+
+
+# Create a figure with two traces
+fig = go.Figure()
+
+# Plot prediction_label with full opacity
+fig.add_trace(go.Bar(x=classification_predictions['timestamp [dd/mm/yyyy HH:MM]'],
+                     y=classification_predictions['prediction_label'],
+                     name='Prediction Label', marker_color='blue'))
+
+# Plot model_target with reduced opacity
+fig.add_trace(go.Bar(x=classification_predictions['timestamp [dd/mm/yyyy HH:MM]'],
+                     y=classification_predictions[model_target].apply(categorize_presence),
+                    #  y=classification_predictions[model_target],
+                     name='Model Target', marker_color='rgba(255, 0, 0, 0.5)'))
+
+# Update layout
+fig.update_layout(barmode='overlay',  # Overlay bars on the same axis
+                  title='Bar Plot for Prediction Label and Model Target',
+                  xaxis_title='Date',
+                  yaxis_title='Values')
+
+# Customize the x-axis to show dates nicely
+fig.update_xaxes(
+    tickformat='%d/%m/%Y %H:%M',
+    tickangle=45,
+    tickmode='auto'
+)
+
+# Show the plot
+fig.show()
+
 
 # for kitchen occupancy : 
 place ='kitchen'
-Classification(merged_df,model_target, model_features, best_by="Recall", place=place)
+Classification(merged_df,model_target, model_features, best_by="Prec.", place=place)
 
 # for closed_desk_3 occupancy : 
-Classification(merged_df,model_target, model_features, best_by="Recall", place=place)
+Classification(merged_df,model_target, model_features, best_by="Prec.", place=place)
 
 # Temperature : 
-regression(merged_df,temperature, other_features_temp, best_by="RMSE", place=place)
+regression(merged_df,temperature, other_features_temp + global_features, best_by="RMSE", place=place)
+
+regression_predictions_model_Temp, regression_predictions_Temp = regression(train_data_hourly,temperature, other_features_temp + global_features, best_by="RMSE", place=place ,new_data= test_data_hourly)
+regression_predictions_Temp["prediction_label"].plot()
+regression_predictions_Temp[temperature].plot()
+
+
+
+
 
 # Humidity : 
-regression(merged_df,Humidity, other_features_humd, best_by="RMSE", place=place)
+regression(merged_df,Humidity, other_features_humd + global_features, best_by="RMSE", place=place)
+
+regression_predictions_model_humd, regression_predictions_humd = regression(train_data_hourly,Humidity, other_features_humd + global_features, best_by="RMSE", place=place ,new_data= test_data_hourly)
+regression_predictions_humd["prediction_label"].plot()
+regression_predictions_humd[Humidity].plot()
+
+
+"""
+# Plotting :: prédictions vs valeurs
+"""
+
+# Plotting
+plt.figure(figsize=(12, 6))
+
+# Plot true values
+plt.plot(classification_predictions[model_target].apply(categorize_presence), label='True Values', marker='o')
+
+# Plot predictions
+plt.plot(classification_predictions["prediction_label"], label='Predictions', marker='o')
+
+plt.title('True Values vs Predictions')
+plt.xlabel('Timestamp')
+plt.ylabel('Values')
+plt.legend()
+plt.grid(True)
+plt.show()
+
+"""# heat binary classification : """
+
+import plotly.express as px
+import pandas as pd
+
+# Assuming you have a DataFrame named 'classification_predictions'
+# Replace 'prediction_label' and 'model_target' with your actual column names
+
+# Convert the 'timestamp' index to datetime with the correct format
+classification_predictions.index = pd.to_datetime(classification_predictions.index, format='%d/%m/%Y %H:%M')
+
+# Filter data for the month of December
+december_data = classification_predictions[
+    (classification_predictions.index.month == 12)
+]
+
+# Create a binary column indicating whether prediction matches label
+december_data['match'] = (december_data['prediction_label'] == december_data[model_target].apply(categorize_presence)).astype(int)
+
+# Get the range of days in December
+days_in_december = range(1, 32)
+
+# Pivot the data to get it in the form suitable for a heatmap, including all days
+heatmap_data = december_data.pivot_table(index=december_data.index.day,
+                                         columns=december_data.index.hour*4 +
+                                         december_data.index.minute/15,
+                                         values='match',
+                                         aggfunc='max',
+                                         fill_value=0,
+                                         dropna=False  # Include all days even if some are missing
+                                         ).reindex(index=days_in_december, fill_value=0)
+
+# Create the heatmap with just two colors
+fig = px.imshow(heatmap_data,
+                labels=dict(color="Match"),
+                x=heatmap_data.columns,
+                y=heatmap_data.index,
+                color_continuous_scale=["red", "green"],
+                color_continuous_midpoint=0.5,  # Set midpoint to ensure two colors only
+                title='Prediction occupiation in open-desk-4 Match Heatmap for December',
+                )
+
+fig.update_xaxes(
+    title_text='Time (15-minute intervals)',
+    tickvals=list(range(0, 96, 4)),
+    ticktext=[f'{i // 4:02d}:{(i % 4) * 15:02d}' for i in range(0, 96, 4)],
+    tickangle=45,
+)
+
+fig.update_yaxes(
+    title_text='Day of December',
+)
+
+fig.show()
+
+
+
+"""#plot Temp : """
+import plotly.express as px
+import pandas as pd
+
+# Assuming 'merged_df' is your DataFrame
+# merged_df['timestamp'] = pd.to_datetime(merged_df['timestamp [dd/mm/yyyy HH:MM]'], format='%d/%m/%Y %H:%M')
+# merged_df.set_index('timestamp', inplace=True)
+rooms_Temp = merged_df.filter(like="C").columns
+
+
+# Select the relevant columns for the heatmap
+heatmap_df = merged_df[rooms_Temp]
+
+# Transpose the DataFrame to have rooms on the y-axis and timestamps on the x-axis
+heatmap_df = heatmap_df.T
+
+# Create the heatmap
+fig = px.imshow(
+    heatmap_df, 
+    labels=dict(x='Timestamp', y='rooms_Temp', color='Temperature'), 
+    color_continuous_scale='RdBu_r', 
+    origin='lower'
+)
+
+# Customize the layout if needed
+fig.update_layout(
+    title='Room Temperature Heatmap',
+)
+
+# Show the plot
+fig.show()
+
+
+#
+
+
+import plotly.express as px
+import pandas as pd
+
+# Assuming 'merged_df' is your DataFrame
+# merged_df['timestamp'] = pd.to_datetime(merged_df['timestamp [dd/mm/yyyy HH:MM]'], format='%d/%m/%Y %H:%M')
+# merged_df.set_index('timestamp', inplace=True)
+rooms_Humd = merged_df.filter(like="%").columns
+
+
+# Select the relevant columns for the heatmap
+heatmap_df = merged_df[rooms_Humd]
+
+# Transpose the DataFrame to have rooms on the y-axis and timestamps on the x-axis
+heatmap_df = heatmap_df.T
+
+# Create the heatmap
+fig = px.imshow(
+    heatmap_df, 
+    labels=dict(x='Timestamp', y='rooms_Humd', color='Humidity'), 
+    color_continuous_scale='RdBu_r', 
+    origin='lower'
+)
+
+# Customize the layout if needed
+fig.update_layout(
+    title='Room Humidity Heatmap',
+)
+
+# Show the plot
+fig.show()

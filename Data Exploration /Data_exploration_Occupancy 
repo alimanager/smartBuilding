@@ -516,6 +516,26 @@ def filter_working_hours(df, week_end_too=None):
     return df_working_hours
 
 
+def filter_working_hours(df, week_end_too=None, holidays_too=None):
+    import holidays
+    df['timestamp'] = pd.to_datetime(df['timestamp [dd/mm/yyyy HH:MM]'])
+    df.set_index('timestamp', inplace=True)
+    # Filter the data to include only the hours from 6 to 16
+    df_working_hours = df.between_time('6:00', '17:00')
+    if week_end_too == True : 
+        df_working_days = df_working_hours[df_working_hours.index.weekday < 5]
+    
+    if holidays == True :
+        # Identify weekends and public holidays in Austria
+        at_holidays = holidays.Austria(years=df_working_hours['timestamp'].dt.year.unique())
+        df['is_weekend_or_holiday'] = df_working_days['timestamp'].dt.date.apply(lambda x: x in at_holidays)
+
+        # Filter out weekends and holidays from the analysis
+        df = df[~df['is_weekend_or_holiday']]
+    return df_working_hours
+
+
+
 # Test by hour : 
 # def run_test(df, target, by, on):
 #     df['timestamp'] = pd.to_datetime(df['timestamp [dd/mm/yyyy HH:MM]'])
