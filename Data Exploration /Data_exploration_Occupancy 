@@ -122,6 +122,12 @@ def bins_target(df,target):
 """
 Exploraion : Data Analysis
 """
+
+### Data Exploration : 
+from ydata_profiling import ProfileReport
+profile = ProfileReport(merged_df,minimal=True,)
+profile.to_file("merged_df_report.html")
+
 # plot target and features : 
 import matplotlib.dates as mdates
 

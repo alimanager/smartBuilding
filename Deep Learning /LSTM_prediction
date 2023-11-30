@@ -1,0 +1,112 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import plotly.io as pio
+import holidays
+from sklearn.cluster import KMeans
+from tabulate import tabulate
+from prophet import Prophet
+from prophet.diagnostics import cross_validation, performance_metrics
+from datetime import datetime
+from sklearn.metrics import mean_squared_error
+import matplotlib.pyplot as plt
+
+
+# Specify your GitHub path
+path = "https://raw.githubusercontent.com/alimanager/smartBuilding/master/"
+
+# Get a list of all .csv files in the GitHub directory
+# Please note that GitHub API doesn't allow listing directory contents, 
+# so you have to provide the names of your csv files manually
+csv_files = ['01_occ.csv', '02_win.csv', '03_light.csv','04_plug.csv','05_temp_in.csv','06_rhu_in.csv','07_rad_global.csv','08_temp_out.csv','09_rhu_out.csv','10_wsp.csv','11_wdi.csv']  # Replace with your actual file names
+
+# Create a dictionary to store DataFrames with corresponding names for each .csv file
+dfs = {}
+
+# Read each .csv file, rename the DataFrame, and store it in the dictionary
+for file_name in csv_files:
+    df_name = file_name.replace('.csv', '')  # Extract DataFrame name from the file name
+    url = path + file_name
+    dfs[df_name] = pd.read_csv(url)  # Create DataFrame with the extracted name
+
+    # Perform the merge based on a common key (e.g., 'common_column')
+    # Replace 'common_column' with the actual column name that is common across all DataFrames
+    merged_df = dfs['01_occ']  # Initialize merged_df with one of the DataFrames
+    for df_name, df in dfs.items():
+        if df_name != '01_occ':  # Skip the first DataFrame since it's already stored in merged_df
+            merged_df = pd.merge(merged_df, df, on='timestamp [dd/mm/yyyy HH:MM]',how='outer' )
+            # merged_df.fillna(method='ffill', inplace=True)
+            # Forward-fill missing temperature values
+            merged_df.fillna(method='ffill', inplace=True)
+
+
+    # Now you have a merged DataFrame named 'merged_df' containing data from all .csv files
+    nan_df = merged_df.isna()
+
+    # If there are any NaN values, the nan_df DataFrame will contain True in those positions.
+    # You can check if there are any NaN values in the entire DataFrame by using the any() method.
+    if nan_df.any().any():
+        print("The DataFrame contains NaN values.")
+    else:
+        print("The DataFrame does not contain NaN values.")
+
+
+    merged_df
+
+# variables selection, models to train/test : 
+# Define global features
+global_features = ['tempOut [C]', 'rh [%]', 'gh [W/m2]', 'wind speed [m/s]']
+
+# Define models
+models = {
+    'kitchen': {
+        'features': ['ki [%]', 'ki [C]', 'ki  [1:closed 0:open]', 'ki [0:off 1:on]'],
+        'target': 'ki [0:vacant 1:occupied]'
+    },
+    'open_desk_4': {
+        'features': ['o4 [%]', 'o4 [C]', 'o4_1 [1:closed 0:open]', 'o4_2 [1:closed 0:open]', 'o4_1 [0:off 1:on]', 'o4_2 [0:off 1:on]'] ,
+        'target': 'o4 [0:vacant 1:occupied]'
+    },
+    # 'meeting_room': {
+    #     'features': ["mr_1 [1:closed 0:open]", "mr_2 [1:closed 0:open]", "mr_3 [1:closed 0:open]", "mr_4 [1:closed 0:open]", "mr_5 [1:closed 0:open]", "mr_6 [1:closed 0:open]", "mr [C]", "mr [%]"] ,
+    #     'target': 'mr [0:vacant 1:occupied]'
+    # },
+    'closed_desk_3': {
+        'features': ["o3 [%]" , "o3 [C]", "o3_1 [1:closed 0:open]", "o3_2 [1:closed 0:open]", "o3_3 [1:closed 0:open]", "o3_4 [1:closed 0:open]", "o3_1 [0:off 1:on]", "o3_2 [0:off 1:on]", "o3 [W]"] ,
+        'target': 'o3 [0:vacant 1:occupied]'
+    }
+}
+# Define models labels in french : 
+labels_fr = {
+    'kitchen': {
+        'features': ['Humidité Cuisine [%]', 'Température Cuisine [C]', 'Fenêtre Cuisine [1:fermée 0:ouverte]', 'Lumière Cuisine [0:éteinte 1:allumée]'],
+        'target': 'Occupation Cuisine [0:vacant 1:occupé]'
+    },
+    'open_desk_4': {
+        'features': ['Humidité Bureau Ouvert 4 [%]', 'Température Bureau Ouvert 4 [C]', 'Fenêtre Bureau Ouvert 4_1 [1:fermée 0:ouverte]', 'Fenêtre Bureau Ouvert 4_2 [1:fermée 0:ouverte]', 'Lumière Bureau Ouvert 4_1 [0:éteinte 1:allumée]', 'Lumière Bureau Ouvert 4_2 [0:éteinte 1:allumée]'] ,
+        'target': 'Occupation Bureau Ouvert 4 [0:vacant 1:occupé]'
+    },
+    'closed_desk_3': {
+        'features': ["Fenêtre Bureau Fermé 3_1 [1:fermée 0:ouverte]", "Fenêtre Bureau Fermé 3_2 [1:fermée 0:ouverte]", "Fenêtre Bureau Fermé 3_3 [1:fermée 0:ouverte]", "Fenêtre Bureau Fermé 3_4 [1:fermée 0:ouverte]", "Lumière Bureau Fermé 3_1 [0:éteinte 1:allumée]", "Lumière Bureau Fermé 3_2 [0:éteinte 1:allumée]", "Energie Bureau Fermé 3 [W]", "Température Bureau Fermé 3 [C]", "Humidité Bureau Fermé 3 [%]"] ,
+        'target': 'Occupation Bureau Fermé 3 [0:vacant 1:occupé]'
+    }
+}
+
+
+# !!! to be changed : open_desk_4 is selected !!!
+place ='open_desk_4'
+# !!! then the target and features will be selected accordinly :
+
+
+model = models[place]
+# Occupancy : 
+model_features = model['features']
+model_target = model['target']
+
+
+import os, sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from Data_laoder. import *
